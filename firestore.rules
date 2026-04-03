@@ -74,6 +74,12 @@ service cloud.firestore {
         allow update: if (isOwner(userId) || (userId == 'shared_portfolio' && isAuthenticated())) && isValidHolding(request.resource.data);
         allow delete: if isOwner(userId) || (userId == 'shared_portfolio' && isAuthenticated()) || isAdmin();
       }
+
+      // Metadata for shared portfolio (e.g., last auto-update time)
+      match /metadata/{docId} {
+        allow read: if true;
+        allow write: if (isOwner(userId) || (userId == 'shared_portfolio' && isAuthenticated()));
+      }
     }
 
     // Default deny

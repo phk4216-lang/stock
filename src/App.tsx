@@ -65,6 +65,7 @@ export default function App() {
   const baseCurrency = 'KRW';
   const [usdToKrwRate, setUsdToKrwRate] = useState<number>(1350); // Default fallback
   const [error, setError] = useState<string | null>(null);
+  const [lastAutoUpdate, setLastAutoUpdate] = useState<string | null>(null);
 
   // Auth Listener
   useEffect(() => {
@@ -102,6 +103,45 @@ export default function App() {
     };
     fetchInitialRate();
   }, [isFirebaseReady]);
+
+  // Shared Portfolio Metadata Listener (for auto-update sync)
+  useEffect(() => {
+    if (!isFirebaseReady) return;
+    const metaRef = doc(db, 'users', 'shared_portfolio', 'metadata', 'status');
+    const unsubscribe = onSnapshot(metaRef, (doc) => {
+      if (doc.exists()) {
+        setLastAutoUpdate(doc.data().lastAutoUpdate);
+      }
+    });
+    return () => unsubscribe();
+  }, [isFirebaseReady]);
+
+  // Auto-update Logic (Check every minute)
+  useEffect(() => {
+    const checkAutoUpdate = async () => {
+      if (!user || isRefreshing || holdings.length === 0) return;
+
+      const now = new Date();
+      // Target: 13:00 (1 PM) KST
+      // KST is UTC+9. 13:00 KST is 04:00 UTC.
+      const currentHourKST = (now.getUTCHours() + 9) % 24;
+      
+      if (currentHourKST >= 13) {
+        const todayStr = now.toISOString().split('T')[0];
+        const lastUpdateDate = lastAutoUpdate ? lastAutoUpdate.split('T')[0] : null;
+        
+        // If last update wasn't today, or we don't have a record, and it's past 1 PM
+        if (lastUpdateDate !== todayStr) {
+          console.log("Triggering scheduled 1 PM update...");
+          handleRefresh();
+        }
+      }
+    };
+
+    const interval = setInterval(checkAutoUpdate, 60000); // Check every minute
+    checkAutoUpdate(); // Initial check
+    return () => clearInterval(interval);
+  }, [user, lastAutoUpdate, holdings.length, isRefreshing]);
 
   // Real-time Holdings Listener
   useEffect(() => {
@@ -157,6 +197,7 @@ export default function App() {
   }, [holdings, baseCurrency, usdToKrwRate]);
 
   const handleRefresh = async () => {
+    console.log("Refresh triggered. User:", user?.email, "Holdings count:", holdings.length);
     if (holdings.length === 0) return;
     if (!user) {
       setError("Please login to update prices.");
@@ -166,13 +207,21 @@ export default function App() {
     setError(null);
     try {
       const tickersToFetch = holdings.map(h => ({ ticker: h.ticker, currency: h.currency }));
+      console.log("Fetching prices for:", tickersToFetch);
       const [prices, rate] = await Promise.all([
         fetchStockPrices(tickersToFetch),
         getExchangeRate('USD', 'KRW')
       ]);
       
+      console.log("Prices received:", prices);
+      console.log("Exchange rate received:", rate);
+
       setUsdToKrwRate(rate);
       
+      if (Object.keys(prices).length === 0) {
+        throw new Error("No price data returned from API.");
+      }
+
       // Update each holding in Firestore
       const updatePromises = holdings.map(h => {
         const normalizedTicker = h.ticker.trim().toUpperCase();
@@ -188,8 +237,17 @@ export default function App() {
       });
       
       await Promise.all(updatePromises);
+
+      // Update metadata timestamp
+      const metaRef = doc(db, 'users', 'shared_portfolio', 'metadata', 'status');
+      await setDoc(metaRef, {
+        lastAutoUpdate: new Date().toISOString(),
+        updatedBy: user.email
+      }, { merge: true });
+
     } catch (err) {
-      setError("Failed to fetch latest prices. Please try again.");
+      console.error("Refresh error:", err);
+      setError("Failed to fetch latest prices. Check connection or API key.");
     } finally {
       setIsRefreshing(false);
     }
@@ -306,7 +364,7 @@ export default function App() {
               onClick={handleRefresh}
               disabled={isRefreshing}
               className={cn(
-                "flex items-center justify-center gap-2 px-4 py-2 rounded-full text-sm font-bold transition-all min-h-[40px] min-w-[100px]",
+                "flex items-center justify-center gap-2 px-4 py-2 rounded-full text-sm font-bold transition-all min-h-[44px] min-w-[110px]",
                 "bg-indigo-600 text-white hover:bg-indigo-700 active:scale-95 shadow-md shadow-indigo-100",
                 "disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100"
               )}
@@ -347,8 +405,13 @@ export default function App() {
               <DollarSign className="text-indigo-500 w-4 h-4 sm:w-5 sm:h-5" />
             </div>
             <div className="text-2xl sm:text-3xl font-bold text-slate-900 truncate">{formatCurrency(summary.totalValue, baseCurrency)}</div>
-            <div className="mt-1 sm:mt-2 text-xs text-slate-500">
-              Cost Basis: {formatCurrency(summary.totalCost, baseCurrency)}
+            <div className="mt-1 sm:mt-2 text-xs text-slate-500 flex justify-between items-center">
+              <span>Cost Basis: {formatCurrency(summary.totalCost, baseCurrency)}</span>
+              {lastAutoUpdate && (
+                <span className="text-[10px] text-indigo-400 font-medium">
+                  Last Updated: {new Date(lastAutoUpdate).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </span>
+              )}
             </div>
           </motion.div>
 
