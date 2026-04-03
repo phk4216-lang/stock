@@ -29,7 +29,7 @@ import {
 } from 'recharts';
 import { cn, formatCurrency, formatPercentage } from './lib/utils';
 import { StockHolding, PortfolioSummary } from './types';
-import { fetchStockPrices, getExchangeRate } from './services/gemini';
+import { fetchStockPrices, getExchangeRate, isGeminiConfigured } from './services/gemini';
 import { 
   auth, 
   db, 
@@ -206,6 +206,10 @@ export default function App() {
     setIsRefreshing(true);
     setError(null);
     try {
+      if (!isGeminiConfigured) {
+        throw new Error("Gemini API Key is not configured. Please set VITE_GEMINI_API_KEY in environment variables.");
+      }
+
       const tickersToFetch = holdings.map(h => ({ ticker: h.ticker, currency: h.currency }));
       console.log("Fetching prices for:", tickersToFetch);
       const [prices, rate] = await Promise.all([
@@ -247,7 +251,8 @@ export default function App() {
 
     } catch (err) {
       console.error("Refresh error:", err);
-      setError("Failed to fetch latest prices. Check connection or API key.");
+      const message = err instanceof Error ? err.message : "Check connection or API key.";
+      setError(`Failed to fetch latest prices: ${message}`);
     } finally {
       setIsRefreshing(false);
     }

@@ -1,23 +1,21 @@
 import { GoogleGenAI } from "@google/genai";
 
 const getApiKey = () => {
-  try {
-    // Try process.env (Node/AI Studio)
-    if (typeof process !== 'undefined' && process.env && process.env.GEMINI_API_KEY) {
-      return process.env.GEMINI_API_KEY;
-    }
-    // Try import.meta.env (Vite/Vercel)
-    const meta = import.meta as any;
-    if (typeof meta !== 'undefined' && meta.env && meta.env.VITE_GEMINI_API_KEY) {
-      return meta.env.VITE_GEMINI_API_KEY;
-    }
-  } catch (e) {
-    console.warn("Could not access environment variables:", e);
+  // In Vite, environment variables must be prefixed with VITE_
+  const meta = import.meta as any;
+  const viteKey = meta.env?.VITE_GEMINI_API_KEY;
+  if (viteKey) return viteKey;
+
+  // Fallback for other environments
+  if (typeof process !== 'undefined' && process.env && process.env.GEMINI_API_KEY) {
+    return process.env.GEMINI_API_KEY;
   }
+  
   return "";
 };
 
 const apiKey = getApiKey();
+export const isGeminiConfigured = !!apiKey;
 const ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
 
 export async function fetchStockPrices(holdings: { ticker: string, currency: string }[]): Promise<Record<string, number>> {
@@ -35,17 +33,34 @@ export async function fetchStockPrices(holdings: { ticker: string, currency: str
   Example: {"AAPL": 150.25, "005930": 72000}`;
 
   try {
-    const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
-      contents: prompt,
-      config: {
-        tools: [{ googleSearch: {} }],
-        responseMimeType: "application/json",
-      },
-    });
+    console.log("Gemini Request Prompt:", prompt);
+    let response;
+    try {
+      response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: prompt,
+        config: {
+          tools: [{ googleSearch: {} }],
+          responseMimeType: "application/json",
+        },
+      });
+    } catch (searchError) {
+      console.warn("Google Search tool failed, trying without it:", searchError);
+      response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: prompt + " (Use your internal knowledge if real-time search is unavailable)",
+        config: {
+          responseMimeType: "application/json",
+        },
+      });
+    }
 
     const text = response.text;
-    if (!text) return {};
+    console.log("Gemini Raw Response:", text);
+    if (!text) {
+      console.error("Gemini returned empty text.");
+      return {};
+    }
     
     try {
       const prices = JSON.parse(text);
@@ -70,14 +85,26 @@ export async function getExchangeRate(from: string, to: string): Promise<number>
   const prompt = `What is the current exchange rate from ${from} to ${to}? Return only the numeric value as JSON. Example: {"rate": 1350.5}`;
   
   try {
-    const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
-      contents: prompt,
-      config: {
-        tools: [{ googleSearch: {} }],
-        responseMimeType: "application/json",
-      },
-    });
+    let response;
+    try {
+      response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: prompt,
+        config: {
+          tools: [{ googleSearch: {} }],
+          responseMimeType: "application/json",
+        },
+      });
+    } catch (searchError) {
+      console.warn("Google Search tool failed for exchange rate, trying without it:", searchError);
+      response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: prompt + " (Use your internal knowledge if real-time search is unavailable)",
+        config: {
+          responseMimeType: "application/json",
+        },
+      });
+    }
 
     const text = response.text;
     if (!text) return 1;
