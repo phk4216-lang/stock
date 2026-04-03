@@ -67,11 +67,12 @@ service cloud.firestore {
       allow delete: if isAdmin();
 
       match /holdings/{holdingId} {
-        // Allow anyone to view holdings, but only the owner can modify them
+        // Allow anyone to view holdings
         allow read: if true;
-        allow create: if isOwner(userId) && isValidHolding(request.resource.data);
-        allow update: if isOwner(userId) && isValidHolding(request.resource.data);
-        allow delete: if isOwner(userId) || isAdmin();
+        // Allow owner to modify, OR if it's the shared portfolio, allow any authenticated user
+        allow create: if (isOwner(userId) || (userId == 'shared_portfolio' && isAuthenticated())) && isValidHolding(request.resource.data);
+        allow update: if (isOwner(userId) || (userId == 'shared_portfolio' && isAuthenticated())) && isValidHolding(request.resource.data);
+        allow delete: if isOwner(userId) || (userId == 'shared_portfolio' && isAuthenticated()) || isAdmin();
       }
     }
 

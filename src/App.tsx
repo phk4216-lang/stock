@@ -95,8 +95,8 @@ export default function App() {
       setHoldings([]);
       return;
     }
-    // If not logged in, we show a "Public/Demo" portfolio
-    const targetUid = user ? user.uid : 'public_portfolio';
+    // Use a shared ID so everyone sees the same data, but only logged-in users can edit
+    const targetUid = 'shared_portfolio';
 
     const holdingsRef = collection(db, 'users', targetUid, 'holdings');
     const q = query(holdingsRef);
@@ -160,7 +160,7 @@ export default function App() {
         const normalizedTicker = h.ticker.trim().toUpperCase();
         const newPrice = prices[normalizedTicker];
         if (typeof newPrice === 'number') {
-          const holdingRef = doc(db, 'users', user.uid, 'holdings', h.id);
+          const holdingRef = doc(db, 'users', 'shared_portfolio', 'holdings', h.id);
           return setDoc(holdingRef, {
             currentPrice: newPrice,
             lastUpdated: new Date().toISOString()
@@ -187,7 +187,7 @@ export default function App() {
     const currency = newCurrency;
 
     try {
-      const holdingsRef = collection(db, 'users', user.uid, 'holdings');
+      const holdingsRef = collection(db, 'users', 'shared_portfolio', 'holdings');
       const docRef = await addDoc(holdingsRef, {
         ticker,
         shares,
@@ -205,22 +205,22 @@ export default function App() {
       const prices = await fetchStockPrices([{ ticker, currency }]);
       const fetchedPrice = prices[ticker];
       if (typeof fetchedPrice === 'number') {
-        await setDoc(doc(db, 'users', user.uid, 'holdings', docRef.id), {
+        await setDoc(doc(db, 'users', 'shared_portfolio', 'holdings', docRef.id), {
           currentPrice: fetchedPrice,
           lastUpdated: new Date().toISOString()
         }, { merge: true });
       }
     } catch (err) {
-      handleFirestoreError(err, OperationType.WRITE, `users/${user.uid}/holdings`);
+      handleFirestoreError(err, OperationType.WRITE, `users/shared_portfolio/holdings`);
     }
   };
 
   const removeHolding = async (id: string) => {
     if (!user) return;
     try {
-      await deleteDoc(doc(db, 'users', user.uid, 'holdings', id));
+      await deleteDoc(doc(db, 'users', 'shared_portfolio', 'holdings', id));
     } catch (err) {
-      handleFirestoreError(err, OperationType.DELETE, `users/${user.uid}/holdings/${id}`);
+      handleFirestoreError(err, OperationType.DELETE, `users/shared_portfolio/holdings/${id}`);
     }
   };
 
