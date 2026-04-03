@@ -4,13 +4,23 @@ const getApiKey = () => {
   // In Vite, environment variables must be prefixed with VITE_
   const meta = import.meta as any;
   const viteKey = meta.env?.VITE_GEMINI_API_KEY;
-  if (viteKey) return viteKey;
+  if (viteKey) {
+    console.log("Gemini API Key found in import.meta.env.VITE_GEMINI_API_KEY");
+    return viteKey;
+  }
 
   // Fallback for other environments
   if (typeof process !== 'undefined' && process.env && process.env.GEMINI_API_KEY) {
+    console.log("Gemini API Key found in process.env.GEMINI_API_KEY");
     return process.env.GEMINI_API_KEY;
   }
   
+  if (typeof process !== 'undefined' && process.env && process.env.VITE_GEMINI_API_KEY) {
+    console.log("Gemini API Key found in process.env.VITE_GEMINI_API_KEY");
+    return process.env.VITE_GEMINI_API_KEY;
+  }
+  
+  console.warn("Gemini API Key NOT found in any environment variable.");
   return "";
 };
 
