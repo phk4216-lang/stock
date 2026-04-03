@@ -11,7 +11,10 @@ import {
   ArrowDownRight,
   Search,
   Loader2,
-  Globe
+  Globe,
+  LogOut,
+  LogIn,
+  User as UserIcon
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -27,12 +30,32 @@ import {
 import { cn, formatCurrency, formatPercentage } from './lib/utils';
 import { StockHolding, PortfolioSummary } from './types';
 import { fetchStockPrices, getExchangeRate } from './services/gemini';
+import { 
+  auth, 
+  db, 
+  loginWithGoogle, 
+  logout, 
+  onAuthStateChanged, 
+  User, 
+  handleFirestoreError, 
+  OperationType 
+} from './firebase';
+import { 
+  collection, 
+  doc, 
+  setDoc, 
+  deleteDoc, 
+  onSnapshot, 
+  query, 
+  orderBy,
+  addDoc,
+  serverTimestamp
+} from 'firebase/firestore';
 
 export default function App() {
-  const [holdings, setHoldings] = useState<StockHolding[]>(() => {
-    const saved = localStorage.getItem('portfolio_holdings');
-    return saved ? JSON.parse(saved) : [];
-  });
+  const [user, setUser] = useState<User | null>(null);
+  const [isAuthReady, setIsAuthReady] = useState(false);
+  const [holdings, setHoldings] = useState<StockHolding[]>([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [newTicker, setNewTicker] = useState('');
   const [newShares, setNewShares] = useState('');
@@ -42,9 +65,45 @@ export default function App() {
   const [usdToKrwRate, setUsdToKrwRate] = useState<number>(1350); // Default fallback
   const [error, setError] = useState<string | null>(null);
 
+  // Auth Listener
   useEffect(() => {
-    localStorage.setItem('portfolio_holdings', JSON.stringify(holdings));
-  }, [holdings]);
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      setIsAuthReady(true);
+      if (currentUser) {
+        // Create user profile if it doesn't exist
+        const userRef = doc(db, 'users', currentUser.uid);
+        setDoc(userRef, {
+          email: currentUser.email,
+          displayName: currentUser.displayName,
+          photoURL: currentUser.photoURL,
+          createdAt: new Date().toISOString()
+        }, { merge: true }).catch(err => handleFirestoreError(err, OperationType.WRITE, `users/${currentUser.uid}`));
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Real-time Holdings Listener
+  useEffect(() => {
+    // If not logged in, we show a "Public/Demo" portfolio
+    const targetUid = user ? user.uid : 'public_portfolio';
+
+    const holdingsRef = collection(db, 'users', targetUid, 'holdings');
+    const q = query(holdingsRef);
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const data = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as StockHolding[];
+      setHoldings(data);
+    }, (err) => {
+      handleFirestoreError(err, OperationType.LIST, `users/${targetUid}/holdings`);
+    });
+
+    return () => unsubscribe();
+  }, [user]);
 
   const summary = useMemo<PortfolioSummary>(() => {
     const totalValue = holdings.reduce((sum, h) => {
@@ -75,11 +134,10 @@ export default function App() {
   }, [holdings, baseCurrency, usdToKrwRate]);
 
   const handleRefresh = async () => {
-    if (holdings.length === 0) return;
+    if (!user || holdings.length === 0) return;
     setIsRefreshing(true);
     setError(null);
     try {
-      // Fetch prices
       const tickersToFetch = holdings.map(h => ({ ticker: h.ticker, currency: h.currency }));
       const [prices, rate] = await Promise.all([
         fetchStockPrices(tickersToFetch),
@@ -87,15 +145,22 @@ export default function App() {
       ]);
       
       setUsdToKrwRate(rate);
-      setHoldings(prev => prev.map(h => {
+      
+      // Update each holding in Firestore
+      const updatePromises = holdings.map(h => {
         const normalizedTicker = h.ticker.trim().toUpperCase();
         const newPrice = prices[normalizedTicker];
-        return {
-          ...h,
-          currentPrice: typeof newPrice === 'number' ? newPrice : h.currentPrice,
-          lastUpdated: new Date().toISOString()
-        };
-      }));
+        if (typeof newPrice === 'number') {
+          const holdingRef = doc(db, 'users', user.uid, 'holdings', h.id);
+          return setDoc(holdingRef, {
+            currentPrice: newPrice,
+            lastUpdated: new Date().toISOString()
+          }, { merge: true });
+        }
+        return Promise.resolve();
+      });
+      
+      await Promise.all(updatePromises);
     } catch (err) {
       setError("Failed to fetch latest prices. Please try again.");
     } finally {
@@ -105,44 +170,49 @@ export default function App() {
 
   const handleAddStock = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newTicker || !newShares || !newPrice) return;
+    if (!user || !newTicker || !newShares || !newPrice) return;
 
     const ticker = newTicker.trim().toUpperCase();
     const shares = parseFloat(newShares);
     const avgPrice = parseFloat(newPrice);
     const currency = newCurrency;
 
-    const newHolding: StockHolding = {
-      id: crypto.randomUUID(),
-      ticker,
-      shares,
-      avgPrice,
-      currency,
-      currentPrice: avgPrice, // Initial fallback
-      lastUpdated: new Date().toISOString()
-    };
-
-    setHoldings(prev => [...prev, newHolding]);
-    setNewTicker('');
-    setNewShares('');
-    setNewPrice('');
-
-    // Immediately try to fetch the real current price for this ticker
     try {
+      const holdingsRef = collection(db, 'users', user.uid, 'holdings');
+      const docRef = await addDoc(holdingsRef, {
+        ticker,
+        shares,
+        avgPrice,
+        currency,
+        currentPrice: avgPrice,
+        lastUpdated: new Date().toISOString()
+      });
+
+      setNewTicker('');
+      setNewShares('');
+      setNewPrice('');
+
+      // Immediately try to fetch the real current price
       const prices = await fetchStockPrices([{ ticker, currency }]);
       const fetchedPrice = prices[ticker];
       if (typeof fetchedPrice === 'number') {
-        setHoldings(prev => prev.map(h => 
-          h.id === newHolding.id ? { ...h, currentPrice: fetchedPrice, lastUpdated: new Date().toISOString() } : h
-        ));
+        await setDoc(doc(db, 'users', user.uid, 'holdings', docRef.id), {
+          currentPrice: fetchedPrice,
+          lastUpdated: new Date().toISOString()
+        }, { merge: true });
       }
     } catch (err) {
-      console.error("Failed to fetch initial price for new stock:", err);
+      handleFirestoreError(err, OperationType.WRITE, `users/${user.uid}/holdings`);
     }
   };
 
-  const removeHolding = (id: string) => {
-    setHoldings(prev => prev.filter(h => h.id !== id));
+  const removeHolding = async (id: string) => {
+    if (!user) return;
+    try {
+      await deleteDoc(doc(db, 'users', user.uid, 'holdings', id));
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `users/${user.uid}/holdings/${id}`);
+    }
   };
 
   const chartData = useMemo(() => {
@@ -175,6 +245,36 @@ export default function App() {
             </div>
           </div>
           <div className="flex items-center justify-between w-full sm:w-auto gap-3 sm:gap-4">
+            {user ? (
+              <div className="flex items-center gap-3 mr-2">
+                <div className="hidden md:block text-right">
+                  <p className="text-xs font-bold text-slate-900">{user.displayName}</p>
+                  <p className="text-[10px] text-slate-500">{user.email}</p>
+                </div>
+                {user.photoURL ? (
+                  <img src={user.photoURL} alt="Profile" className="w-8 h-8 rounded-full border border-slate-200" referrerPolicy="no-referrer" />
+                ) : (
+                  <div className="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center">
+                    <UserIcon className="w-4 h-4 text-slate-500" />
+                  </div>
+                )}
+                <button 
+                  onClick={logout}
+                  className="p-2 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-all"
+                  title="Logout"
+                >
+                  <LogOut className="w-4 h-4" />
+                </button>
+              </div>
+            ) : (
+              <button 
+                onClick={loginWithGoogle}
+                className="flex items-center gap-2 px-4 py-2 rounded-full text-sm font-bold bg-indigo-600 text-white hover:bg-indigo-700 transition-all shadow-sm"
+              >
+                <LogIn className="w-4 h-4" />
+                Login
+              </button>
+            )}
             <div className="flex bg-slate-100 p-1 rounded-lg shrink-0">
               <button 
                 onClick={() => setBaseCurrency('KRW')}
@@ -211,8 +311,15 @@ export default function App() {
       </header>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Dashboard Summary */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+        {!isAuthReady ? (
+          <div className="flex flex-col items-center justify-center py-20">
+            <Loader2 className="w-10 h-10 text-indigo-600 animate-spin mb-4" />
+            <p className="text-slate-500 font-medium">Loading your portfolio...</p>
+          </div>
+        ) : (
+          <>
+            {/* Dashboard Summary */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
           <motion.div 
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -271,9 +378,15 @@ export default function App() {
           </motion.div>
         </div>
 
-        <div className="flex flex-col lg:grid lg:grid-cols-3 gap-8">
+        <div className={cn(
+          "flex flex-col gap-8",
+          user ? "lg:grid lg:grid-cols-3" : "max-w-4xl mx-auto"
+        )}>
           {/* Main Content: Holdings (Top on mobile, Right on desktop) */}
-          <div className="order-1 lg:order-2 lg:col-span-2 space-y-8">
+          <div className={cn(
+            "order-1 space-y-8",
+            user ? "lg:order-2 lg:col-span-2" : "w-full"
+          )}>
             <section className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
               <div className="p-6 border-b border-slate-100 flex items-center justify-between">
                 <h2 className="text-lg font-bold">Your Holdings</h2>
@@ -298,7 +411,7 @@ export default function App() {
                       {holdings.length === 0 ? (
                         <tr>
                           <td colSpan={6} className="px-6 py-12 text-center text-slate-400">
-                            No holdings yet. Add your first stock to get started.
+                            No holdings yet. {user ? 'Add your first stock to get started.' : 'Login to start tracking your own portfolio.'}
                           </td>
                         </tr>
                       ) : (
@@ -350,12 +463,14 @@ export default function App() {
                                 </div>
                               </td>
                               <td className="px-6 py-4 text-right">
-                                <button 
-                                  onClick={() => removeHolding(h.id)}
-                                  className="p-2 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-all opacity-0 group-hover:opacity-100"
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                </button>
+                                {user && (
+                                  <button 
+                                    onClick={() => removeHolding(h.id)}
+                                    className="p-2 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-all opacity-0 group-hover:opacity-100"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                )}
                               </td>
                             </motion.tr>
                           );
@@ -371,7 +486,7 @@ export default function App() {
                 <AnimatePresence mode="popLayout">
                   {holdings.length === 0 ? (
                     <div className="px-6 py-12 text-center text-slate-400 text-sm">
-                      No holdings yet. Add your first stock to get started.
+                      No holdings yet. {user ? 'Add your first stock to get started.' : 'Login to start tracking your own portfolio.'}
                     </div>
                   ) : (
                     holdings.map((h) => {
@@ -398,12 +513,14 @@ export default function App() {
                               <span className="font-bold text-slate-900">{h.ticker}</span>
                               <span className="text-xs text-slate-400 font-medium">({h.shares} shares)</span>
                             </div>
-                            <button 
-                              onClick={() => removeHolding(h.id)}
-                              className="p-1.5 text-slate-300 hover:text-rose-500 transition-colors"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
+                            {user && (
+                              <button 
+                                onClick={() => removeHolding(h.id)}
+                                className="p-1.5 text-slate-300 hover:text-rose-500 transition-colors"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            )}
                           </div>
                           
                           <div className="grid grid-cols-2 gap-4">
@@ -435,13 +552,14 @@ export default function App() {
           </div>
 
           {/* Sidebar: Form (Bottom on mobile, Left on desktop) */}
-          <div className="order-2 lg:order-1 lg:col-span-1 space-y-8">
-            {/* Add Stock Form */}
-            <section className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-              <h2 className="text-lg font-bold mb-6 flex items-center gap-2">
-                <Plus className="w-5 h-5 text-indigo-600" />
-                Add New Position
-              </h2>
+          {user && (
+            <div className="order-2 lg:order-1 lg:col-span-1 space-y-8">
+              {/* Add Stock Form */}
+              <section className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm relative overflow-hidden">
+                <h2 className="text-lg font-bold mb-6 flex items-center gap-2">
+                  <Plus className="w-5 h-5 text-indigo-600" />
+                  Add New Position
+                </h2>
               <form onSubmit={handleAddStock} className="space-y-4">
                 <div className="flex gap-2 p-1 bg-slate-50 rounded-xl mb-4 overflow-x-auto no-scrollbar">
                   <button 
@@ -512,8 +630,11 @@ export default function App() {
               </form>
             </section>
           </div>
-        </div>
-      </main>
+        )}
+      </div>
+    </>
+  )}
+</main>
     </div>
   );
 }

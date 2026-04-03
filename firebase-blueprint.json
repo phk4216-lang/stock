@@ -1,0 +1,40 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "Private user profile data",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "format": "email" },
+        "displayName": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["email", "createdAt"]
+    },
+    "Holding": {
+      "title": "Stock Holding",
+      "description": "A single stock position in the user's portfolio",
+      "type": "object",
+      "properties": {
+        "ticker": { "type": "string" },
+        "shares": { "type": "number" },
+        "avgPrice": { "type": "number" },
+        "currency": { "type": "string", "enum": ["USD", "KRW"] },
+        "currentPrice": { "type": "number" },
+        "lastUpdated": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ticker", "shares", "avgPrice", "currency"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profile document"
+    },
+    "/users/{userId}/holdings/{holdingId}": {
+      "schema": "Holding",
+      "description": "Individual stock holdings for a user"
+    }
+  }
+}
