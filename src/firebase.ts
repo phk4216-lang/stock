@@ -3,15 +3,49 @@ import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChang
 import { getFirestore, collection, doc, setDoc, getDoc, getDocs, deleteDoc, onSnapshot, query, where, Timestamp, getDocFromServer } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 
-// Initialize Firebase SDK
-const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
-export const auth = getAuth(app);
-export const googleProvider = new GoogleAuthProvider();
+// Validate Firebase Config
+const isConfigValid = (config: any) => {
+  return config && 
+         config.apiKey && 
+         !config.apiKey.includes('TODO') &&
+         config.projectId && 
+         !config.projectId.includes('TODO');
+};
+
+let app;
+let db: any;
+let auth: any;
+let googleProvider: any;
+let isFirebaseReady = false;
+
+try {
+  if (isConfigValid(firebaseConfig)) {
+    app = initializeApp(firebaseConfig);
+    db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+    auth = getAuth(app);
+    googleProvider = new GoogleAuthProvider();
+    isFirebaseReady = true;
+  } else {
+    console.warn("Firebase configuration is missing or contains placeholder values. Some features will be disabled.");
+  }
+} catch (error) {
+  console.error("Failed to initialize Firebase:", error);
+}
+
+export { db, auth, googleProvider, isFirebaseReady };
 
 // Auth helpers
-export const loginWithGoogle = () => signInWithPopup(auth, googleProvider);
-export const logout = () => signOut(auth);
+export const loginWithGoogle = () => {
+  if (!isFirebaseReady) {
+    alert("Firebase is not configured correctly. Please check your settings.");
+    return Promise.reject("Firebase not ready");
+  }
+  return signInWithPopup(auth, googleProvider);
+};
+export const logout = () => {
+  if (!isFirebaseReady) return Promise.resolve();
+  return signOut(auth);
+};
 
 // Firestore Error Handling
 export enum OperationType {

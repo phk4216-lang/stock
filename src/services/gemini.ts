@@ -1,9 +1,31 @@
 import { GoogleGenAI } from "@google/genai";
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+const getApiKey = () => {
+  try {
+    // Try process.env (Node/AI Studio)
+    if (typeof process !== 'undefined' && process.env && process.env.GEMINI_API_KEY) {
+      return process.env.GEMINI_API_KEY;
+    }
+    // Try import.meta.env (Vite/Vercel)
+    const meta = import.meta as any;
+    if (typeof meta !== 'undefined' && meta.env && meta.env.VITE_GEMINI_API_KEY) {
+      return meta.env.VITE_GEMINI_API_KEY;
+    }
+  } catch (e) {
+    console.warn("Could not access environment variables:", e);
+  }
+  return "";
+};
+
+const apiKey = getApiKey();
+const ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
 
 export async function fetchStockPrices(holdings: { ticker: string, currency: string }[]): Promise<Record<string, number>> {
   if (holdings.length === 0) return {};
+  if (!ai) {
+    console.error("Gemini API Key is missing. Please set GEMINI_API_KEY or VITE_GEMINI_API_KEY.");
+    return {};
+  }
 
   const tickersWithCurrency = holdings.map(h => `${h.ticker} (${h.currency})`).join(", ");
   const prompt = `Find the most recent real-time stock market price for these tickers: ${tickersWithCurrency}. 
@@ -44,6 +66,7 @@ export async function fetchStockPrices(holdings: { ticker: string, currency: str
 }
 
 export async function getExchangeRate(from: string, to: string): Promise<number> {
+  if (!ai) return 1;
   const prompt = `What is the current exchange rate from ${from} to ${to}? Return only the numeric value as JSON. Example: {"rate": 1350.5}`;
   
   try {
