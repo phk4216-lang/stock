@@ -62,7 +62,7 @@ export default function App() {
   const [newShares, setNewShares] = useState('');
   const [newPrice, setNewPrice] = useState('');
   const [newCurrency, setNewCurrency] = useState<'USD' | 'KRW'>('USD');
-  const [baseCurrency, setBaseCurrency] = useState<'USD' | 'KRW'>('KRW');
+  const baseCurrency = 'KRW';
   const [usdToKrwRate, setUsdToKrwRate] = useState<number>(1350); // Default fallback
   const [error, setError] = useState<string | null>(null);
 
@@ -88,6 +88,20 @@ export default function App() {
     });
     return () => unsubscribe();
   }, []);
+
+  // Initial Exchange Rate Fetch
+  useEffect(() => {
+    if (!isFirebaseReady) return;
+    const fetchInitialRate = async () => {
+      try {
+        const rate = await getExchangeRate('USD', 'KRW');
+        if (rate > 1) setUsdToKrwRate(rate);
+      } catch (e) {
+        console.error("Failed to fetch initial exchange rate:", e);
+      }
+    };
+    fetchInitialRate();
+  }, [isFirebaseReady]);
 
   // Real-time Holdings Listener
   useEffect(() => {
@@ -143,7 +157,11 @@ export default function App() {
   }, [holdings, baseCurrency, usdToKrwRate]);
 
   const handleRefresh = async () => {
-    if (!user || holdings.length === 0) return;
+    if (holdings.length === 0) return;
+    if (!user) {
+      setError("Please login to update prices.");
+      return;
+    }
     setIsRefreshing(true);
     setError(null);
     try {
@@ -284,36 +302,17 @@ export default function App() {
                 Login
               </button>
             )}
-            <div className="flex bg-slate-100 p-1 rounded-lg shrink-0">
-              <button 
-                onClick={() => setBaseCurrency('KRW')}
-                className={cn(
-                  "px-3 py-1 text-xs font-bold rounded-md transition-all",
-                  baseCurrency === 'KRW' ? "bg-white text-indigo-600 shadow-sm" : "text-slate-500 hover:text-slate-700"
-                )}
-              >
-                KRW
-              </button>
-              <button 
-                onClick={() => setBaseCurrency('USD')}
-                className={cn(
-                  "px-3 py-1 text-xs font-bold rounded-md transition-all",
-                  baseCurrency === 'USD' ? "bg-white text-indigo-600 shadow-sm" : "text-slate-500 hover:text-slate-700"
-                )}
-              >
-                USD
-              </button>
-            </div>
             <button 
               onClick={handleRefresh}
-              disabled={isRefreshing || holdings.length === 0}
+              disabled={isRefreshing}
               className={cn(
-                "flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium transition-all",
-                "bg-indigo-50 text-indigo-700 hover:bg-indigo-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                "flex items-center justify-center gap-2 px-4 py-2 rounded-full text-sm font-bold transition-all min-h-[40px] min-w-[100px]",
+                "bg-indigo-600 text-white hover:bg-indigo-700 active:scale-95 shadow-md shadow-indigo-100",
+                "disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100"
               )}
             >
               {isRefreshing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-              {isRefreshing ? 'Updating...' : 'Refresh'}
+              <span>{isRefreshing ? 'Updating...' : 'Refresh'}</span>
             </button>
           </div>
         </div>
@@ -337,14 +336,14 @@ export default function App() {
         ) : (
           <>
             {/* Dashboard Summary */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
           <motion.div 
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200 shadow-sm"
           >
             <div className="flex items-center justify-between mb-3 sm:mb-4">
-              <span className="text-slate-500 text-[10px] sm:text-xs font-medium uppercase tracking-wider">Total Value ({baseCurrency})</span>
+              <span className="text-slate-500 text-[10px] sm:text-xs font-medium uppercase tracking-wider">Total Value (KRW)</span>
               <DollarSign className="text-indigo-500 w-4 h-4 sm:w-5 sm:h-5" />
             </div>
             <div className="text-2xl sm:text-3xl font-bold text-slate-900 truncate">{formatCurrency(summary.totalValue, baseCurrency)}</div>
@@ -376,22 +375,6 @@ export default function App() {
             )}>
               {summary.totalGainLoss >= 0 ? <ArrowUpRight className="w-3 h-3 sm:w-4 sm:h-4" /> : <ArrowDownRight className="w-3 h-3 sm:w-4 sm:h-4" />}
               {formatPercentage(summary.totalGainLossPercentage)}
-            </div>
-          </motion.div>
-
-          <motion.div 
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.2 }}
-            className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200 shadow-sm"
-          >
-            <div className="flex items-center justify-between mb-3 sm:mb-4">
-              <span className="text-slate-500 text-[10px] sm:text-xs font-medium uppercase tracking-wider">Exchange Rate</span>
-              <Globe className="text-indigo-500 w-4 h-4 sm:w-5 sm:h-5" />
-            </div>
-            <div className="text-xl sm:text-2xl font-bold text-slate-900 truncate">1 USD = {usdToKrwRate.toLocaleString()} KRW</div>
-            <div className="mt-1 sm:mt-2 text-xs text-slate-500">
-              Used for portfolio conversion
             </div>
           </motion.div>
         </div>
