@@ -1,30 +1,27 @@
 import { GoogleGenAI } from "@google/genai";
 
 const getApiKey = () => {
-  // 1. Try standard Vite static replacement (Must use the full string for build-time injection)
-  try {
-    const meta = import.meta as any;
-    const viteKey = meta.env?.VITE_GEMINI_API_KEY;
-    if (viteKey && viteKey !== "MY_GEMINI_API_KEY") {
-      console.log("Gemini API Key found in import.meta.env.VITE_GEMINI_API_KEY");
-      return viteKey;
-    }
-  } catch (e) {
-    console.warn("Error accessing import.meta.env:", e);
+  // 1. Standard Vite static replacement (Must use the full string for build-time injection)
+  // This is the most reliable way for Vite to replace the key during build.
+  const meta = import.meta as any;
+  const viteKey = meta.env?.VITE_GEMINI_API_KEY;
+  if (viteKey && viteKey !== "MY_GEMINI_API_KEY" && viteKey !== "") {
+    console.log("Gemini API Key found via import.meta.env.VITE_GEMINI_API_KEY");
+    return viteKey;
   }
 
-  // 2. Try process.env (Fallback for some environments)
+  // 2. Fallback for development/other environments
   try {
-    if (typeof process !== 'undefined' && process.env) {
-      const pKey = process.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
-      if (pKey && pKey !== "MY_GEMINI_API_KEY") {
-        console.log("Gemini API Key found in process.env");
-        return pKey;
-      }
+    const processKey = (typeof process !== 'undefined' && process.env) 
+      ? (process.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY)
+      : null;
+    if (processKey && processKey !== "MY_GEMINI_API_KEY" && processKey !== "") {
+      console.log("Gemini API Key found via process.env");
+      return processKey;
     }
   } catch (e) {}
-  
-  console.warn("Gemini API Key NOT found. Please ensure VITE_GEMINI_API_KEY is set and REDEPLOY.");
+
+  console.warn("Gemini API Key NOT found. Please ensure VITE_GEMINI_API_KEY is set in Vercel/Environment and REDEPLOY.");
   return "";
 };
 

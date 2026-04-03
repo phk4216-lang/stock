@@ -37,7 +37,7 @@ export { db, auth, googleProvider, isFirebaseReady };
 // Auth helpers
 export const loginWithGoogle = () => {
   if (!isFirebaseReady) {
-    alert("Firebase is not configured correctly. Please check your settings.");
+    console.error("Firebase is not configured correctly. Please check your settings.");
     return Promise.reject("Firebase not ready");
   }
   return signInWithPopup(auth, googleProvider);
