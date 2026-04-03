@@ -1,7 +1,15 @@
 import { GoogleGenAI } from "@google/genai";
 
 const getApiKey = () => {
-  // In Vite, environment variables must be prefixed with VITE_
+  // 1. Try process.env.VITE_GEMINI_API_KEY (Explicitly defined in vite.config.ts)
+  try {
+    if (typeof process !== 'undefined' && process.env && process.env.VITE_GEMINI_API_KEY) {
+      console.log("Gemini API Key found in process.env.VITE_GEMINI_API_KEY");
+      return process.env.VITE_GEMINI_API_KEY;
+    }
+  } catch (e) {}
+
+  // 2. Try import.meta.env.VITE_GEMINI_API_KEY (Standard Vite way)
   const meta = import.meta as any;
   const viteKey = meta.env?.VITE_GEMINI_API_KEY;
   if (viteKey) {
@@ -9,18 +17,15 @@ const getApiKey = () => {
     return viteKey;
   }
 
-  // Fallback for other environments
-  if (typeof process !== 'undefined' && process.env && process.env.GEMINI_API_KEY) {
-    console.log("Gemini API Key found in process.env.GEMINI_API_KEY");
-    return process.env.GEMINI_API_KEY;
-  }
+  // 3. Try process.env.GEMINI_API_KEY (AI Studio default)
+  try {
+    if (typeof process !== 'undefined' && process.env && process.env.GEMINI_API_KEY) {
+      console.log("Gemini API Key found in process.env.GEMINI_API_KEY");
+      return process.env.GEMINI_API_KEY;
+    }
+  } catch (e) {}
   
-  if (typeof process !== 'undefined' && process.env && process.env.VITE_GEMINI_API_KEY) {
-    console.log("Gemini API Key found in process.env.VITE_GEMINI_API_KEY");
-    return process.env.VITE_GEMINI_API_KEY;
-  }
-  
-  console.warn("Gemini API Key NOT found in any environment variable.");
+  console.warn("Gemini API Key NOT found in any environment variable. Please check Vercel settings and REDEPLOY.");
   return "";
 };
 
