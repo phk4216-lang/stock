@@ -199,17 +199,10 @@ export default function App() {
   const handleRefresh = async () => {
     console.log("Refresh triggered. User:", user?.email, "Holdings count:", holdings.length);
     if (holdings.length === 0) return;
-    if (!user) {
-      setError("Please login to update prices.");
-      return;
-    }
+    
     setIsRefreshing(true);
     setError(null);
     try {
-      if (!isGeminiConfigured) {
-        throw new Error("Gemini API Key is not configured. Please set VITE_GEMINI_API_KEY in environment variables.");
-      }
-
       const tickersToFetch = holdings.map(h => ({ ticker: h.ticker, currency: h.currency }));
       console.log("Fetching prices for:", tickersToFetch);
       const [prices, rate] = await Promise.all([
@@ -246,7 +239,7 @@ export default function App() {
       const metaRef = doc(db, 'users', 'shared_portfolio', 'metadata', 'status');
       await setDoc(metaRef, {
         lastAutoUpdate: new Date().toISOString(),
-        updatedBy: user.email
+        updatedBy: user?.email || 'Anonymous'
       }, { merge: true });
 
     } catch (err) {

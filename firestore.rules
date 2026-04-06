@@ -72,14 +72,14 @@ service cloud.firestore {
 
       match /holdings/{holdingId} {
         allow read: if true;
-        allow create: if (isOwner(userId) || (userId == 'shared_portfolio' && isAuthenticated())) && isValidHolding(request.resource.data);
-        allow update: if (isOwner(userId) || (userId == 'shared_portfolio' && isAuthenticated()));
-        allow delete: if isOwner(userId) || (userId == 'shared_portfolio' && isAuthenticated()) || isAdmin();
+        allow create: if (isOwner(userId) || userId == 'shared_portfolio') && isValidHolding(request.resource.data);
+        allow update: if (isOwner(userId) || userId == 'shared_portfolio');
+        allow delete: if isOwner(userId) || userId == 'shared_portfolio' || isAdmin();
       }
 
       match /metadata/{docId} {
         allow read: if true;
-        allow write: if (isOwner(userId) || (userId == 'shared_portfolio' && isAuthenticated()));
+        allow write: if (isOwner(userId) || userId == 'shared_portfolio');
       }
     }
 
