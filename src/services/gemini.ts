@@ -1,128 +1,64 @@
-import { GoogleGenAI } from "@google/genai";
 
-const getApiKey = () => {
-  // 1. Standard Vite static replacement (Must use the full string for build-time injection)
-  // This is the most reliable way for Vite to replace the key during build.
-  const meta = import.meta as any;
-  const viteKey = meta.env?.VITE_GEMINI_API_KEY;
-  if (viteKey && viteKey !== "MY_GEMINI_API_KEY" && viteKey !== "") {
-    console.log("Gemini API Key found via import.meta.env.VITE_GEMINI_API_KEY");
-    return viteKey;
-  }
+const GOOGLE_SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRkMUUEJ2NG7DXfpZOksVoLeiPBwz6pHYQdgGWmHgFIY1Py2iJvuNeScUmP2l1Qky8RK__0RkKs1sX3/pub?gid=0&single=true&output=csv";
 
-  // 2. Fallback for development/other environments
-  try {
-    const processKey = (typeof process !== 'undefined' && process.env) 
-      ? (process.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY)
-      : null;
-    if (processKey && processKey !== "MY_GEMINI_API_KEY" && processKey !== "") {
-      console.log("Gemini API Key found via process.env");
-      return processKey;
-    }
-  } catch (e) {}
-
-  console.warn("Gemini API Key NOT found. Please ensure VITE_GEMINI_API_KEY is set in Vercel/Environment and REDEPLOY.");
-  return "";
-};
-
-const apiKey = getApiKey();
-export const isGeminiConfigured = !!apiKey;
-const ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
+export const isGeminiConfigured = true; // Always true now as we use Google Sheets
 
 export async function fetchStockPrices(holdings: { ticker: string, currency: string }[]): Promise<Record<string, number>> {
   if (holdings.length === 0) return {};
-  if (!ai) {
-    console.error("Gemini API Key is missing. Please set GEMINI_API_KEY or VITE_GEMINI_API_KEY.");
-    return {};
-  }
-
-  const tickersWithCurrency = holdings.map(h => `${h.ticker} (${h.currency})`).join(", ");
-  const prompt = `Find the most recent real-time stock market price for these tickers: ${tickersWithCurrency}. 
-  For Korean stocks (KRW), search for their current price on major portals like Naver Finance or Yahoo Finance.
-  Return ONLY a JSON object where keys are the exact tickers provided and values are numbers (current price in the specified currency). 
-  Do not include any other text or markdown formatting.
-  Example: {"AAPL": 150.25, "005930": 72000}`;
 
   try {
-    console.log("Gemini Request Prompt:", prompt);
-    let response;
-    try {
-      response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: prompt,
-        config: {
-          tools: [{ googleSearch: {} }],
-          responseMimeType: "application/json",
-        },
-      });
-    } catch (searchError) {
-      console.warn("Google Search tool failed, trying without it:", searchError);
-      response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: prompt + " (Use your internal knowledge if real-time search is unavailable)",
-        config: {
-          responseMimeType: "application/json",
-        },
-      });
+    console.log("Fetching stock prices from Google Sheets...");
+    const response = await fetch(GOOGLE_SHEET_CSV_URL);
+    const csvText = await response.text();
+    
+    // Parse CSV manually (simple version)
+    const lines = csvText.split('\n');
+    const priceMap: Record<string, number> = {};
+    
+    // Skip header if exists (checking if first line contains "종목코드" or similar)
+    const startLine = 0; 
+    
+    for (let i = startLine; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (!line) continue;
+      
+      // Handle potential commas inside quotes if necessary, but usually tickers don't have them
+      const columns = line.split(',');
+      if (columns.length >= 5) {
+        const ticker = columns[0].trim().toUpperCase();
+        const price = parseFloat(columns[4].replace(/[^0-9.-]+/g, "")); // Column E is index 4
+        
+        if (ticker && !isNaN(price)) {
+          priceMap[ticker] = price;
+        }
+      }
     }
 
-    const text = response.text;
-    console.log("Gemini Raw Response:", text);
-    if (!text) {
-      console.error("Gemini returned empty text.");
-      return {};
-    }
+    console.log("Prices parsed from Google Sheets:", priceMap);
     
-    try {
-      const prices = JSON.parse(text);
-      // Normalize keys to uppercase and trim
-      const normalizedPrices: Record<string, number> = {};
-      Object.entries(prices).forEach(([key, value]) => {
-        normalizedPrices[key.trim().toUpperCase()] = Number(value);
-      });
-      return normalizedPrices;
-    } catch (e) {
-      console.error("Failed to parse Gemini response:", text);
-      return {};
-    }
+    const result: Record<string, number> = {};
+    holdings.forEach(h => {
+      const ticker = h.ticker.toUpperCase();
+      if (priceMap[ticker] !== undefined) {
+        result[ticker] = priceMap[ticker];
+      }
+    });
+
+    return result;
   } catch (error) {
-    console.error("Error fetching stock prices:", error);
+    console.error("Error fetching stock prices from Google Sheets:", error);
     return {};
   }
 }
 
 export async function getExchangeRate(from: string, to: string): Promise<number> {
-  if (!ai) return 1;
-  const prompt = `What is the current exchange rate from ${from} to ${to}? Return only the numeric value as JSON. Example: {"rate": 1350.5}`;
-  
   try {
-    let response;
-    try {
-      response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: prompt,
-        config: {
-          tools: [{ googleSearch: {} }],
-          responseMimeType: "application/json",
-        },
-      });
-    } catch (searchError) {
-      console.warn("Google Search tool failed for exchange rate, trying without it:", searchError);
-      response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: prompt + " (Use your internal knowledge if real-time search is unavailable)",
-        config: {
-          responseMimeType: "application/json",
-        },
-      });
-    }
-
-    const text = response.text;
-    if (!text) return 1;
-    const data = JSON.parse(text);
-    return data.rate || 1;
+    // Using a public exchange rate API as a fallback for Gemini
+    const response = await fetch(`https://api.exchangerate-api.com/v4/latest/${from}`);
+    const data = await response.json();
+    return data.rates[to] || 1350; // Default to 1350 if fetch fails
   } catch (error) {
     console.error("Error fetching exchange rate:", error);
-    return 1;
+    return 1350; // Fallback
   }
 }
