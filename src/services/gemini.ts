@@ -1,32 +1,41 @@
 
 const GOOGLE_SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRkMUUEJ2NG7DXfpZOksVoLeiPBwz6pHYQdgGWmHgFIY1Py2iJvuNeScUmP2l1Qky8RK__0RkKs1sX3/pub?gid=0&single=true&output=csv";
 
-export const isGeminiConfigured = true; // Always true now as we use Google Sheets
+export const isGeminiConfigured = true;
 
 export async function fetchStockPrices(holdings: { ticker: string, currency: string }[]): Promise<Record<string, number>> {
   if (holdings.length === 0) return {};
 
   try {
-    console.log("Fetching stock prices from Google Sheets...");
-    const response = await fetch(GOOGLE_SHEET_CSV_URL);
+    console.log("Fetching stock prices from Google Sheets URL:", GOOGLE_SHEET_CSV_URL);
+    const response = await fetch(GOOGLE_SHEET_CSV_URL, {
+      method: 'GET',
+      headers: {
+        'Accept': 'text/csv'
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
     const csvText = await response.text();
+    console.log("CSV Data received (first 100 chars):", csvText.substring(0, 100));
     
-    // Parse CSV manually (simple version)
-    const lines = csvText.split('\n');
+    const lines = csvText.split(/\r?\n/);
     const priceMap: Record<string, number> = {};
     
-    // Skip header if exists (checking if first line contains "종목코드" or similar)
-    const startLine = 0; 
-    
-    for (let i = startLine; i < lines.length; i++) {
+    for (let i = 0; i < lines.length; i++) {
       const line = lines[i].trim();
       if (!line) continue;
       
-      // Handle potential commas inside quotes if necessary, but usually tickers don't have them
+      // Simple CSV split (doesn't handle quoted commas, but tickers/prices usually don't have them)
       const columns = line.split(',');
       if (columns.length >= 5) {
-        const ticker = columns[0].trim().toUpperCase();
-        const price = parseFloat(columns[4].replace(/[^0-9.-]+/g, "")); // Column E is index 4
+        const ticker = columns[0].replace(/"/g, '').trim().toUpperCase();
+        // Remove quotes, commas, and any non-numeric chars except dot and minus
+        const rawPrice = columns[4].replace(/"/g, '').trim();
+        const price = parseFloat(rawPrice.replace(/[^0-9.-]+/g, ""));
         
         if (ticker && !isNaN(price)) {
           priceMap[ticker] = price;
@@ -34,31 +43,33 @@ export async function fetchStockPrices(holdings: { ticker: string, currency: str
       }
     }
 
-    console.log("Prices parsed from Google Sheets:", priceMap);
+    console.log("Parsed Price Map:", priceMap);
     
     const result: Record<string, number> = {};
     holdings.forEach(h => {
       const ticker = h.ticker.toUpperCase();
       if (priceMap[ticker] !== undefined) {
         result[ticker] = priceMap[ticker];
+      } else {
+        console.warn(`Price for ticker ${ticker} not found in Google Sheet.`);
       }
     });
 
     return result;
   } catch (error) {
-    console.error("Error fetching stock prices from Google Sheets:", error);
-    return {};
+    console.error("Detailed Fetch Error:", error);
+    throw error; // Re-throw to be caught by App.tsx handleRefresh
   }
 }
 
 export async function getExchangeRate(from: string, to: string): Promise<number> {
   try {
-    // Using a public exchange rate API as a fallback for Gemini
     const response = await fetch(`https://api.exchangerate-api.com/v4/latest/${from}`);
+    if (!response.ok) throw new Error("Exchange rate API failed");
     const data = await response.json();
-    return data.rates[to] || 1350; // Default to 1350 if fetch fails
+    return data.rates[to] || 1350;
   } catch (error) {
     console.error("Error fetching exchange rate:", error);
-    return 1350; // Fallback
+    return 1350;
   }
 }
