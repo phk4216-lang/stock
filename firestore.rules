@@ -50,10 +50,15 @@ service cloud.firestore {
 
     function isValidHolding(data) {
       return data.keys().hasAll(['ticker', 'shares', 'avgPrice', 'currency']) &&
-             data.ticker is string && data.ticker.size() > 0 && data.ticker.size() < 20 &&
-             data.shares is number && data.shares >= 0 &&
-             data.avgPrice is number && data.avgPrice >= 0 &&
+             data.ticker is string && data.ticker.size() > 0 && data.ticker.size() < 50 &&
+             data.shares is number &&
+             data.avgPrice is number &&
              data.currency in ['USD', 'KRW'];
+    }
+
+    function isValidUpdate(data) {
+      // For updates, we just want to make sure the core fields are still there and valid
+      return data.ticker is string && data.shares is number && data.avgPrice is number;
     }
 
     // ===============================================================
@@ -61,21 +66,17 @@ service cloud.firestore {
     // ===============================================================
 
     match /users/{userId} {
-      allow read: if isOwner(userId) || isAdmin();
-      allow create: if isOwner(userId) && isValidUser(request.resource.data);
-      allow update: if isOwner(userId) && isValidUser(request.resource.data);
+      allow read: if isAuthenticated(); // Allow all authenticated users to read user profiles (needed for shared portfolio)
+      allow create, update: if isOwner(userId) && isValidUser(request.resource.data);
       allow delete: if isAdmin();
 
       match /holdings/{holdingId} {
-        // Allow anyone to view holdings
         allow read: if true;
-        // Allow owner to modify, OR if it's the shared portfolio, allow any authenticated user
         allow create: if (isOwner(userId) || (userId == 'shared_portfolio' && isAuthenticated())) && isValidHolding(request.resource.data);
-        allow update: if (isOwner(userId) || (userId == 'shared_portfolio' && isAuthenticated())) && isValidHolding(request.resource.data);
+        allow update: if (isOwner(userId) || (userId == 'shared_portfolio' && isAuthenticated()));
         allow delete: if isOwner(userId) || (userId == 'shared_portfolio' && isAuthenticated()) || isAdmin();
       }
 
-      // Metadata for shared portfolio (e.g., last auto-update time)
       match /metadata/{docId} {
         allow read: if true;
         allow write: if (isOwner(userId) || (userId == 'shared_portfolio' && isAuthenticated()));
