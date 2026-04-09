@@ -73,18 +73,25 @@ export async function fetchStockPrices(holdings: { ticker: string, currency: str
     holdings.forEach(h => {
       const searchKey = h.ticker.toUpperCase().replace(/\s+/g, ''); // Normalize: "KODEX 200" -> "KODEX200"
       
-      // Find the best match in the sheet
-      const foundRow = fullRowMap.find(row => {
+      // 1. Try Exact Match first (Highest Priority)
+      let foundRow = fullRowMap.find(row => {
         const rowTicker = row.ticker.replace(/\s+/g, '');
         const rowName = row.name.replace(/\s+/g, '');
-        
-        return rowTicker === searchKey || 
-               rowName === searchKey ||
-               rowTicker.includes(searchKey) ||
-               searchKey.includes(rowTicker) ||
-               rowName.includes(searchKey) ||
-               searchKey.includes(rowName);
+        return rowTicker === searchKey || rowName === searchKey;
       });
+
+      // 2. Try Partial Match if no exact match found
+      if (!foundRow) {
+        foundRow = fullRowMap.find(row => {
+          const rowTicker = row.ticker.replace(/\s+/g, '');
+          const rowName = row.name.replace(/\s+/g, '');
+          
+          return rowTicker.includes(searchKey) || 
+                 searchKey.includes(rowTicker) ||
+                 rowName.includes(searchKey) ||
+                 searchKey.includes(rowName);
+        });
+      }
       
       if (foundRow) {
         console.log(`Match found: "${h.ticker}" -> Sheet: [${foundRow.ticker} / ${foundRow.name}] Price: ${foundRow.price}`);
